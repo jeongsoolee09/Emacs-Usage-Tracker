@@ -1,6 +1,8 @@
 ;;; emacs-usage-tracker.el ---  -*- lexical-binding: t; -*-
 
 (require 'cl-lib)
+(require 's)    ; string manipulation library
+(require 'ts)   ; timestamp library
 
 
 (defcustom emacs-track-file-dir "~/.emacs.d/.emacs-hours"
@@ -13,22 +15,16 @@
     (make-empty-file target-dir)))
 
 
-(defun save-uptime-at-exit ()
-  "1. create a temp buffer,
-   2. write the uptime (in seconds) into that buffer,
-   3. and save the buffer, appending to the existing `.emacs-hours` file."
-  (let ((date (format-time-string "%Y-%m-%d:"))
-        (uptime (concat (emacs-uptime "%s") "\n")))
-    (with-temp-buffer
-      (insert date)
-      (insert uptime)
-      (append-to-file (point-min) (point-max) *track-file-dir*))))
-
-
 (defun save-time-at-startup ()
   (with-temp-buffer
-    (insert (format-time-string "%Y-%m-%d~"))
-    (append-to-file (point-min) (point-max) *track-file-dir*)))
+    (insert (concat (current-time-string) "~"))
+    (append-to-file (point-min) (point-max) emacs-track-file-dir)))
+
+
+(defun save-time-at-exit ()
+  (with-temp-buffer
+    (insert (current-time-string))
+    (append-to-file (point-min) (point-max) emacs-track-file-dir)))
 
 
 (defun emacs-usage-tracker-setup ()
@@ -38,6 +34,45 @@
   (add-hook save-uptime-at-exit kill-emacs-hook))
 
 
+(defun calculate-uptime (time-line)
+  "calculate the uptime from the string <start>~<end>"
+  (let* ((two-tss (s-split "~" time-line))
+         (starting-ts (ts-parse (car two-tss)))
+         (ending-ts (ts-parse (cadr two-tss))))
+    (ts-difference ending-ts starting-ts)))
+
+
+(defun zero-apply (ts)
+  (ts-fill (ts-apply :hour 0 :minute 0 :second 0 ts)))
+
+
+(defun adjust-to-sunday-and-zero-apply (ts num)
+  (->> ts
+      (ts-adjust 'day (- 0 num))
+      (ts-fill)
+      (zero-apply)))
+
+
+(defun get-this-weeks-sunday-date (date)
+  (let ((now-ts (ts-fill date)))
+    (pcase (ts-day-abbr now-ts)
+      ("Sun" (zero-apply now-ts))
+      ("Mon" (adjust-to-sunday-and-zero-apply now-ts 1))
+      ("Tue" (adjust-to-sunday-and-zero-apply now-ts 2))
+      ("Wed" (adjust-to-sunday-and-zero-apply now-ts 3))
+      ("Thu" (adjust-to-sunday-and-zero-apply now-ts 4))
+      ("Fri" (adjust-to-sunday-and-zero-apply now-ts 5))
+      ("Sat" (adjust-to-sunday-and-zero-apply now-ts 6)))))
+
+
+(defun read-entire-track-file ()
+  "Read the track file line by line, and collect them into a list.
+   credit: ErgoEmacs"
+  (with-temp-buffer
+    (insert-file-contents emacs-track-file-dir)
+    (split-string (buffer-string) "\n" t)))
+
+
 (defun seconds-to-hours-and-mins (seconds)
   (format-seconds "%d days, %h hours, %m minutes, and %s seconds"))
 
@@ -45,12 +80,38 @@
 ;; Statistics functions
 
 
+(defun is-today (time-line date)
+  (let* ((two-tss (s-split "~" time-line))
+         (starting-ts (ts-parse (car two-tss)))
+         (ending-ts (ts-parse (cadr two-tss))))
+    (equal (ts-day starting-ts)
+           (ts-day date))))
+
+
+(defun is-complete (time-line)
+  (let* ((two-tss (s-split "~" time-line))
+         (starting-ts (ts-parse (car two-tss)))
+         (ending-ts (ts-parse (cadr two-tss))))
+    (not (equal (ts-day ending-ts) ""))))
+
+
 (defun get-usage-of-day (date)
-  "Given a date, get the usage of that day.")
+  "Given a date, get the usage of that day, by:
+   - if there are no complete records in the file, return the uptime
+   - if there are complete records in the file, add up all the uptimes"
+  (let* ((track-file-lines (read-entire-track-file))
+         (today-lines (cl-loop for line in track-file-lines
+                               if (and (is-today line date)
+                                       (is-complete line))
+                               collect line)))
+    (if (null today-lines)
+        (cl-parse-integer (emacs-uptime "%s"))
+      (apply #'+ (mapcar #'calculate-uptime today-lines)))))
 
 
 (defun get-usage-of-today ()
-  "Get the usage of today.")
+  "Get the usage of today."
+  (get-usage-of-day (ts-now)))
 
 
 (defun get-usage-of-week (date)
