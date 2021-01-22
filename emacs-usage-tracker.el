@@ -79,10 +79,6 @@
       (mapcar #'parse-a-line string-list))))
 
 
-(defun seconds-to-hours-and-mins (seconds)
-  (format-seconds "%d days, %h hours, %m minutes, and %s seconds"))
-
-
 ;; Statistics functions
 
 
@@ -119,7 +115,9 @@
   "Get the usage of today."
   (-> (ts-now)
       (ts-fill)
-      (get-usage-of-day)))
+      (get-usage-of-day)
+      (seconds-to-hours-and-mins)
+      (message)))
 
 
 (defun get-usage-of-week (date)
@@ -134,22 +132,35 @@
                        (ts-in (this-weeks-sunday)
                               (this-weeks-saturday))))
          (mapcar #'get-usage-of-day)
-         (reduce +))))
+         (reduce #'+))))
 
 
 (defun get-usage-of-this-week ()
   "Get the usage of this week upto today."
   (-> (ts-now)
       (ts-fill)
-      (get-usage-of-week)))
+      (get-usage-of-week)
+      (ts-human-duration)
+      (message)))
 
 
 (defun get-usage-of-month (date)
-  "Get the usage of that month upto the given date.")
+  "Get the usage of that month upto the given date."
+  (->> (read-entire-track-file)
+       (seq-filter (lambda (ts)
+                     (= (ts-month ts)
+                        (ts-month date))))
+       (mapcar #'get-usage-of-day)
+       (reduce #'+)))
 
 
 (defun get-usage-of-this-month ()
-  "Get the usage of this month upto today.")
+  "Get the usage of this month upto today."
+  (-> (ts-now)
+      (ts-fill)
+      (get-usage-of-month)
+      (ts-human-duration)
+      (message)))
 
 
 (defun get-usage-of-year (date)
