@@ -48,12 +48,12 @@
 
 (defun adjust-to-sunday-and-zero-apply (ts num)
   (->> ts
-      (ts-adjust 'day (- 0 num))
-      (ts-fill)
-      (zero-apply)))
+       (ts-adjust 'day (- 0 num))
+       (ts-fill)
+       (zero-apply)))
 
 
-(defun get-this-weeks-sunday-date (date)
+(defun get-this-weeks-sunday (date)
   (let ((now-ts (ts-fill date)))
     (pcase (ts-day-abbr now-ts)
       ("Sun" (zero-apply now-ts))
@@ -66,11 +66,17 @@
 
 
 (defun read-entire-track-file ()
-  "Read the track file line by line, and collect them into a list.
-   credit: ErgoEmacs"
-  (with-temp-buffer
-    (insert-file-contents emacs-track-file-dir)
-    (split-string (buffer-string) "\n" t)))
+  "Read the track file line by line, parse them,
+   and collect them into a list."
+  (let ((string-list (with-temp-buffer
+                       (insert-file-contents emacs-track-file-dir)
+                       (split-string (buffer-string) "\n" t))))
+    (cl-flet ((parse-a-line (line)
+                            (->> (s-split "~" line)
+                                 (mapcar #'ts-parse)
+                                 (mapcar #'ts-fill)
+                                 ((lambda (lst) `((:start . ,(car lst)) (:end . ,(cadr lst))))))))
+      (mapcar #'parse-a-line string-list))))
 
 
 (defun seconds-to-hours-and-mins (seconds)
@@ -83,14 +89,13 @@
 (defun is-today (time-line date)
   (let* ((two-tss (s-split "~" time-line))
          (starting-ts (ts-parse (car two-tss)))
-         (ending-ts (ts-parse (cadr two-tss))))
-    (equal (ts-day starting-ts)
-           (ts-day date))))
+         (equal (ts-day starting-ts)
+                (ts-day date)))))
 
 
 (defun is-complete (time-line)
+  "tests if a given timeline has both starting ts and the ending ts."
   (let* ((two-tss (s-split "~" time-line))
-         (starting-ts (ts-parse (car two-tss)))
          (ending-ts (ts-parse (cadr two-tss))))
     (not (equal (ts-day ending-ts) ""))))
 
@@ -98,7 +103,8 @@
 (defun get-usage-of-day (date)
   "Given a date, get the usage of that day, by:
    - if there are no complete records in the file, return the uptime
-   - if there are complete records in the file, add up all the uptimes"
+   - if there are complete records in the file, add up all the uptimes
+   The uptimes are in seconds."
   (let* ((track-file-lines (read-entire-track-file))
          (today-lines (cl-loop for line in track-file-lines
                                if (and (is-today line date)
@@ -111,15 +117,31 @@
 
 (defun get-usage-of-today ()
   "Get the usage of today."
-  (get-usage-of-day (ts-now)))
+  (-> (ts-now)
+      (ts-fill)
+      (get-usage-of-day)))
 
 
 (defun get-usage-of-week (date)
-  "Get the usage of that week upto the given date.")
+  "Get the usage of that week upto the given date."
+  (let* ((this-weeks-sunday (get-this-weeks-sunday date))
+         (this-weeks-saturday (-> (ts-now)
+                                  (ts-fill)
+                                  (ts-adjust 'day 6)
+                                  (ts-fill))))
+    (->> (read-entire-track-file)
+         (seq-filter (lambda (x)
+                       (ts-in (this-weeks-sunday)
+                              (this-weeks-saturday))))
+         (mapcar #'get-usage-of-day)
+         (reduce +))))
 
 
 (defun get-usage-of-this-week ()
-  "Get the usage of this week upto today.")
+  "Get the usage of this week upto today."
+  (-> (ts-now)
+      (ts-fill)
+      (get-usage-of-week)))
 
 
 (defun get-usage-of-month (date)
