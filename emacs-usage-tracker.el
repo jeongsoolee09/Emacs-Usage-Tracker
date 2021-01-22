@@ -164,7 +164,22 @@
 
 
 (defun get-usage-of-year (date)
-  "Get the usage of that year upto the given date.")
+  "Get the usage of that year upto the given date."
+  (->> (read-entire-track-file)
+       (seq-filter (lambda (ts)
+                     (= (ts-year ts)
+                        (ts-year date))))
+       (mapcar #'get-usage-of-day)
+       (reduce #'+)))
+
+
+(defun get-usage-of-this-year ()
+  "Get the usage of this year upto today."
+  (-> (ts-now)
+      (ts-fill)
+      (get-usage-of-year)
+      (ts-human-duration)
+      (message)))
 
 
 (defun get-highest-day-of-month (date)
